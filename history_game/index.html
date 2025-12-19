@@ -1,0 +1,396 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>歷史大崩壞：虎門銷煙大作戰</title>
+    <style>
+        /* CSS reset 與基本樣式 */
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #333;
+            font-family: "Microsoft JhengHei", Arial, sans-serif;
+            touch-action: none;
+        }
+
+        #gameCanvas {
+            display: block;
+            margin: 0 auto;
+            /* 如果背景圖沒載入，這個顏色會顯示 */
+            background: linear-gradient(to bottom, #87CEEB 0%, #E0F7FA 60%, #F4A460 60%, #DEB887 100%);
+        }
+
+        /* UI 介面層 */
+        #uiLayer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+        }
+
+        .hud {
+            padding: 10px 20px;
+            color: #fff;
+            text-shadow: 2px 2px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000;
+            font-size: 24px;
+            font-weight: bold;
+            display: flex;
+            justify-content: space-between;
+            z-index: 5;
+        }
+
+        /* 遊戲結束/開始畫面 */
+        #menuScreen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            color: white;
+            z-index: 10;
+            pointer-events: auto;
+        }
+
+        h1 {
+            font-size: 36px;
+            margin-bottom: 10px;
+            text-align: center;
+            color: #FFD700;
+            text-shadow: 0 0 10px rgba(255, 215, 0, 0.5);
+        }
+
+        p {
+            font-size: 18px;
+            margin: 5px 0;
+            text-align: center;
+            max-width: 80%;
+            line-height: 1.5;
+        }
+
+        button {
+            margin-top: 25px;
+            padding: 15px 50px;
+            font-size: 24px;
+            background-color: #d9534f;
+            color: white;
+            border: 2px solid #fff;
+            border-radius: 50px;
+            cursor: pointer;
+            box-shadow: 0 5px 0 #c9302c;
+            font-weight: bold;
+            transition: transform 0.1s;
+        }
+
+        button:active {
+            transform: translateY(5px);
+            box-shadow: none;
+        }
+
+        .control-hint {
+            color: rgba(255,255,255,0.7);
+            font-size: 14px;
+            text-align: center;
+            width: 100%;
+            position: absolute;
+            bottom: 20px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- 遊戲畫布 -->
+    <canvas id="gameCanvas"></canvas>
+
+    <!-- UI 層 -->
+    <div id="uiLayer">
+        <div class="hud">
+            <span id="scoreDisplay">銷煙: 0箱</span>
+            <span id="timeDisplay">⏳ 60</span>
+            <span id="hpDisplay">❤❤❤</span>
+        </div>
+    </div>
+
+    <!-- 選單畫面 -->
+    <div id="menuScreen">
+        <h1 id="menuTitle">歷史大崩壞<br>虎門銷煙大作戰</h1>
+        <p id="menuDesc">控制林則徐左右移動，接住「鴉片箱」銷毀它！<br>小心躲避英國的「蒸汽戰艦」！</p>
+        <button id="startBtn" onclick="startGame()">開始銷煙</button>
+        <div class="control-hint">電腦: 左右方向鍵 | 手機: 點擊螢幕左右側</div>
+    </div>
+
+    <script>
+        // --- 1. 初始化設定 ---
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        
+        // 圖片資源載入系統
+        const images = {
+            bg: new Image(),
+            player: new Image(),
+            opium: new Image(),
+            ship: new Image()
+        };
+
+        // 設定圖片路徑
+        images.bg.src = 'assets/img/bg.png';
+        images.player.src = 'assets/img/player.png';
+        images.opium.src = 'assets/img/opium.png';
+        images.ship.src = 'assets/img/ship.png';
+
+        // 遊戲變數
+        let gameState = 'MENU'; 
+        let score = 0;
+        let timeLeft = 60;
+        let hp = 3;
+        let lastTime = 0;
+        let spawnTimer = 0;
+        let gameLoopId;
+        
+        const player = {
+            x: 0,
+            y: 0,
+            width: 80,  // 稍微加大一點讓圖片清楚
+            height: 80,
+            speed: 400,
+            color: '#1E90FF'
+        };
+
+        let items = [];
+        const keys = { ArrowLeft: false, ArrowRight: false };
+
+        // --- 2. 視窗適配 (RWD) ---
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            player.y = canvas.height - player.height - 20;
+            if(player.x > canvas.width - player.width) player.x = canvas.width - player.width;
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        // --- 3. 輸入控制 ---
+        window.addEventListener('keydown', (e) => { keys[e.code] = true; });
+        window.addEventListener('keyup', (e) => { keys[e.code] = false; });
+
+        canvas.addEventListener('touchstart', handleTouch);
+        canvas.addEventListener('touchend', () => { keys.ArrowLeft = false; keys.ArrowRight = false; });
+
+        function handleTouch(e) {
+            e.preventDefault();
+            const touchX = e.touches[0].clientX;
+            if (touchX < canvas.width / 2) {
+                keys.ArrowLeft = true;
+                keys.ArrowRight = false;
+            } else {
+                keys.ArrowLeft = false;
+                keys.ArrowRight = true;
+            }
+        }
+
+        // --- 4. 遊戲核心邏輯 ---
+        function startGame() {
+            score = 0;
+            timeLeft = 60;
+            hp = 3;
+            items = [];
+            player.x = canvas.width / 2 - player.width / 2;
+            gameState = 'PLAYING';
+            
+            updateHUD();
+            document.getElementById('menuScreen').style.display = 'none';
+            
+            lastTime = performance.now();
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+            requestAnimationFrame(gameLoop);
+        }
+
+        function gameLoop(timestamp) {
+            if (gameState !== 'PLAYING') return;
+            const dt = (timestamp - lastTime) / 1000;
+            lastTime = timestamp;
+
+            update(dt);
+            draw();
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function update(dt) {
+            timeLeft -= dt;
+            if (timeLeft <= 0) {
+                gameOver(true);
+                return;
+            }
+            
+            if (keys.ArrowLeft && player.x > 0) player.x -= player.speed * dt;
+            if (keys.ArrowRight && player.x < canvas.width - player.width) player.x += player.speed * dt;
+
+            // 難度曲線
+            let spawnRate = 1.0;
+            if (timeLeft < 40) spawnRate = 0.8;
+            if (timeLeft < 20) spawnRate = 0.5;
+            
+            spawnTimer += dt;
+            if (spawnTimer > spawnRate) {
+                spawnItem();
+                spawnTimer = 0;
+            }
+
+            for (let i = items.length - 1; i >= 0; i--) {
+                let item = items[i];
+                item.y += item.speed * dt;
+
+                // 碰撞判定 (稍微縮小碰撞框，讓手感更好)
+                const hitBoxPadding = 10;
+                if (
+                    player.x + hitBoxPadding < item.x + item.width - hitBoxPadding &&
+                    player.x + player.width - hitBoxPadding > item.x + hitBoxPadding &&
+                    player.y + hitBoxPadding < item.y + item.height - hitBoxPadding &&
+                    player.y + player.height - hitBoxPadding > item.y + hitBoxPadding
+                ) {
+                    handleCollision(item);
+                    items.splice(i, 1);
+                    continue;
+                }
+
+                if (item.y > canvas.height) items.splice(i, 1);
+            }
+            updateHUD();
+        }
+
+        function spawnItem() {
+            const isBad = Math.random() > 0.6;
+            const size = 70; // 圖片大一點比較好看
+            const x = Math.random() * (canvas.width - size);
+            
+            let speedBase = 250;
+            if (timeLeft < 30) speedBase = 400;
+
+            items.push({
+                x: x,
+                y: -80,
+                width: size,
+                height: size,
+                type: isBad ? 'SHIP' : 'OPIUM',
+                speed: speedBase + Math.random() * 150
+            });
+        }
+
+        function handleCollision(item) {
+            if (item.type === 'OPIUM') {
+                score += 10;
+            } else {
+                hp -= 1;
+                canvas.style.transform = "translate(5px, 5px)";
+                setTimeout(() => canvas.style.transform = "none", 100);
+                if (hp <= 0) gameOver(false);
+            }
+        }
+
+        function updateHUD() {
+            document.getElementById('scoreDisplay').innerText = `銷煙: ${score/10}箱`;
+            document.getElementById('timeDisplay').innerText = `⏳ ${Math.ceil(timeLeft)}`;
+            let hpStr = "";
+            for(let i=0; i<hp; i++) hpStr += "❤";
+            document.getElementById('hpDisplay').innerText = hpStr;
+        }
+
+        function gameOver(isWin) {
+            gameState = 'GAMEOVER';
+            const menu = document.getElementById('menuScreen');
+            const title = document.getElementById('menuTitle');
+            const desc = document.getElementById('menuDesc');
+            const btn = document.getElementById('startBtn');
+
+            menu.style.display = 'flex';
+            btn.innerText = "重新挑戰";
+
+            if (isWin) {
+                title.innerText = "🏆 虎門銷煙成功！";
+                title.style.color = "#FFD700";
+                desc.innerHTML = `你銷毀了 <b>${score/10}</b> 箱鴉片！<br>面對列強的巨艦，你守住了民族的尊嚴。<br>（但歷史的車輪仍在轉動...）`;
+            } else {
+                title.innerText = "💀 歷史大崩壞...";
+                title.style.color = "#d9534f";
+                desc.innerHTML = `遭到英軍艦隊重創！<br>南京條約簽訂，清朝門戶洞開...<br>請再試一次，保護林大人！`;
+            }
+        }
+
+        // --- 5. 繪圖系統 (自動切換圖片或幾何圖形) ---
+        function draw() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 1. 繪製背景
+            if (images.bg.complete && images.bg.naturalWidth !== 0) {
+                // 確保背景圖填滿畫面 (類似 CSS cover)
+                ctx.drawImage(images.bg, 0, 0, canvas.width, canvas.height);
+            } else {
+                // 如果沒有背景圖，顯示原本的漸層色 (在CSS中設定了，這裡留空即可顯示Canvas透明底)
+            }
+
+            // 2. 繪製玩家
+            if (images.player.complete && images.player.naturalWidth !== 0) {
+                ctx.drawImage(images.player, player.x, player.y, player.width, player.height);
+            } else {
+                // 備用方案: 藍色方塊 + 黃色補子
+                ctx.fillStyle = player.color;
+                ctx.fillRect(player.x, player.y + 20, player.width, player.height - 20);
+                ctx.fillStyle = '#FFD700';
+                ctx.fillRect(player.x + player.width/4, player.y + 35, player.width/2, player.width/2);
+                ctx.fillStyle = '#FFE4C4';
+                ctx.beginPath();
+                ctx.arc(player.x + player.width/2, player.y + 15, 15, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // 3. 繪製掉落物
+            items.forEach(item => {
+                if (item.type === 'OPIUM') {
+                    if (images.opium.complete && images.opium.naturalWidth !== 0) {
+                        ctx.drawImage(images.opium, item.x, item.y, item.width, item.height);
+                    } else {
+                        // 備用方案: 鴉片箱
+                        ctx.fillStyle = '#8B4513';
+                        ctx.fillRect(item.x, item.y, item.width, item.height);
+                        ctx.strokeStyle = '#DAA520';
+                        ctx.lineWidth = 2;
+                        ctx.strokeRect(item.x, item.y, item.width, item.height);
+                        ctx.fillStyle = '#FFF';
+                        ctx.font = '12px Arial';
+                        ctx.textAlign = 'center';
+                        ctx.fillText('鴉片', item.x + item.width/2, item.y + item.height/2 + 5);
+                    }
+                } else {
+                    if (images.ship.complete && images.ship.naturalWidth !== 0) {
+                        ctx.drawImage(images.ship, item.x, item.y, item.width, item.height);
+                    } else {
+                        // 備用方案: 戰艦
+                        ctx.fillStyle = '#2F4F4F';
+                        ctx.beginPath();
+                        ctx.moveTo(item.x, item.y + item.height/2);
+                        ctx.lineTo(item.x + item.width, item.y + item.height/2);
+                        ctx.lineTo(item.x + item.width - 10, item.y + item.height);
+                        ctx.lineTo(item.x + 10, item.y + item.height);
+                        ctx.closePath();
+                        ctx.fill();
+                        ctx.fillStyle = '#000';
+                        ctx.fillRect(item.x + item.width/2 - 5, item.y, 10, item.height/2);
+                    }
+                }
+            });
+        }
+    </script>
+</body>
+</html>
